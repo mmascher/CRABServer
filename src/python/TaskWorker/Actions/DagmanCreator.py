@@ -34,7 +34,7 @@ from ApmonIf import ApmonIf
 DAG_FRAGMENT = """
 JOB Job%(count)d Job.%(count)d.submit
 SCRIPT PRE  Job%(count)d dag_bootstrap.sh PREJOB $RETRY %(count)d %(taskname)s %(backend)s
-SCRIPT POST Job%(count)d dag_bootstrap.sh POSTJOB $JOBID $RETURN $RETRY $MAX_RETRIES %(restinstance)s %(resturl)s %(taskname)s %(count)d %(outputData)s %(sw)s %(asyncDest)s %(tempDest)s %(outputDest)s cmsRun_%(count)d.log.tar.gz %(remoteOutputFiles)s
+SCRIPT POST Job%(count)d dag_bootstrap.sh POSTJOB $JOBID $RETURN $RETRY $MAX_RETRIES %(restinstance)s %(resturl)s %(asoinstance)s %(taskname)s %(count)d %(outputData)s %(sw)s %(asyncDest)s %(tempDest)s %(outputDest)s cmsRun_%(count)d.log.tar.gz %(remoteOutputFiles)s
 #PRE_SKIP Job%(count)d 3
 RETRY Job%(count)d 10 UNLESS-EXIT 2
 VARS Job%(count)d count="%(count)d" runAndLumiMask="%(runAndLumiMask)s" lheInputFiles="%(lheInputFiles)s" firstEvent="%(firstEvent)s" firstLumi="%(firstLumi)s" lastEvent="%(lastEvent)s" firstRun="%(firstRun)s" seeding="%(seeding)s" inputFiles="%(inputFiles)s" +CRAB_localOutputFiles="\\"%(localOutputFiles)s\\"" +CRAB_DataBlock="\\"%(block)s\\""
@@ -287,6 +287,7 @@ def make_specs(task, sitead, jobgroup, block, availablesites, outfiles, startjob
                       'tempDest': os.path.join(temp_dest, counter),
                       'outputDest': os.path.join(dest, counter),
                       'restinstance': task['restinstance'], 'resturl': task['resturl'],
+                      'asoinstance': task['asoinstance'],
                       'block': block,
                       'backend': os.environ.get('HOSTNAME','')})
 
@@ -494,6 +495,8 @@ class DagmanCreator(TaskAction.TaskAction):
             kw['task']['scratch'] = temp_dir
 
         kw['task']['restinstance'] = self.server['host']
+        import pdb;pdb.set_trace()
+        kw['task']['asoinstance'] = self.backendurls[]
         kw['task']['resturl'] = self.resturl.replace("/workflowdb", "/filemetadata")
         self.task = kw['task']
         params = self.sendDashboardTask()

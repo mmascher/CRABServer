@@ -25,6 +25,7 @@ import hashlib
 import TaskWorker.Actions.RetryJob as RetryJob
 import pprint
 import time, datetime
+from ast import literal_eval
 
 import DashboardAPI
 
@@ -114,7 +115,7 @@ class FTSJob(object):
                 return 1
 
 class ASOServerJob(object):
-    def __init__(self, dest_site, source_dir, dest_dir, source_sites, count, filenames, reqname, outputdata, log_size, output_metadata, task_ad):
+    def __init__(self, dest_site, source_dir, dest_dir, source_sites, count, filenames, reqname, outputdata, log_size, output_metadata, task_ad, asoinstance):
         self.id = None
         self.couchServer = None
         self.couchDatabase = None
@@ -132,13 +133,9 @@ class ASOServerJob(object):
         self.publish = outputdata
         self.task_ad = task_ad
         proxy = os.environ.get('X509_USER_PROXY', None)
-        aso_auth_file = os.path.expanduser("~/auth_aso_plugin.config")
-        if config:
-            aso_auth_file = getattr(config, "authfile", "auth_aso_plugin.config")
+
         try:
-            f = open(aso_auth_file)
-            authParams = json.loads(f.read())
-            self.aso_db_url = authParams['ASO_DB_URL']
+            self.aso_db_url = asoinstance
             print "Got aso %s" % self.aso_db_url
             self.couchServer = CMSCouch.CouchServer(dburl=self.aso_db_url, ckey=proxy, cert=proxy)
             self.couchDatabase = self.couchServer.connectDatabase("asynctransfer", create = False)
@@ -657,7 +654,7 @@ class PostJob():
         return self.node_map.get(self.full_report.get(u"SEName"), self.source_site)
 
 
-    def stageout(self, source_dir, dest_dir, *filenames):
+    def stageout(self, asoinstance, source_dir, dest_dir, *filenames):
         self.dest_site = self.ad['CRAB_AsyncDest']
 
         source_sites = []
@@ -677,10 +674,9 @@ class PostJob():
             outfile[1]['outlocation'] = self.dest_site
 
         global g_Job
-        aso_auth_file = os.path.expanduser("~/auth_aso_plugin.config")
-        if config:
-            aso_auth_file = getattr(config, "authfile", "auth_aso_plugin.config")
-        if os.path.isfile(aso_auth_file) or os.environ.get("TEST_POSTJOB_ENABLE_ASOSERVER", False):
+
+        asoinstance = getASOInstance()
+        if asoinstance or os.environ.get("TEST_POSTJOB_ENABLE_ASOSERVER", False):
             targetClass = ASOServerJob
         else:
             targetClass = FTSJob
@@ -707,6 +703,21 @@ class PostJob():
 
         return fts_job_result
 
+    def getASOInstance(self, asoinstance):
+        #priority to the configuration file
+        aso_auth_file = os.path.expanduser("~/auth_aso_plugin.config")
+        if config:
+            aso_auth_file = getattr(config, "authfile", "auth_aso_plugin.config")
+        if os.path.isfile(aso_auth_file) or os.environ.get("TEST_POSTJOB_ENABLE_ASOSERVER", False):
+            try:
+                f = open(aso_auth_file)
+                authParams = json.loads(f.read())
+                self.aso_db_url = authParams['ASO_DB_URL']
+            except:
+                print traceback.format_exc()
+                raise
+
+        return asoinstance
 
     def makeNodeMap(self):
         p = PhEDEx.PhEDEx()
@@ -741,7 +752,7 @@ class PostJob():
         DashboardAPI.apmonFree()
         return retval
 
-    def execute_internal(self, cluster, status, retry_count, max_retries, restinstance, resturl, reqname, id, outputdata, sw, async_dest, source_dir, dest_dir, *filenames):
+    def execute_internal(self, cluster, status, retry_count, max_retries, restinstance, resturl, asoinstance, reqname, id, outputdata, sw, async_dest, source_dir, dest_dir, *filenames):
         self.sw = sw
         self.reqname = reqname
         self.outputData = outputdata
@@ -831,7 +842,7 @@ class PostJob():
         self.fixPerms()
         try:
             self.uploadLog(dest_dir, filenames[0])
-            self.stageout(source_dir, dest_dir, *filenames)
+            self.stageout(asoinstance, source_dir, dest_dir, *filenames)
             try:
                 self.upload()
             except HTTPException, hte:
@@ -870,7 +881,7 @@ class testServer(unittest.TestCase):
         #self.job = ASOServerJob()
         #status, retry_count, max_retries, restinstance, resturl, reqname, id,
         #outputdata, sw, async_dest, source_dir, dest_dir, *filenames
-        self.fullArgs = ['0', 1, 3, 'restinstance', 'resturl',
+        self.fullArgs = ['0', 1, 3, 'restinstance', 'resturl', 'asoinstance',
                          'reqname', 1234, 'outputdata', 'sw', 'T2_US_Vanderbilt']
         self.jsonName = "jobReport.json.%s" % self.fullArgs[6]
         open(self.jsonName, 'w').write(json.dumps(self.generateJobJson()))
