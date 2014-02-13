@@ -97,7 +97,8 @@ def get_job_id(source):
     
     return left_piece + "." + right_piece, fileid
 
-def set_se_name(dest_file, se_name):
+
+def set_se_name(dest_file, se_name, direct=False):
     """
     Alter the job report to record where the given file was
     staged out to.  If we cannot determine the matching file,
@@ -131,11 +132,13 @@ def set_se_name(dest_file, se_name):
                 continue
 
             outputFile['SEName'] = se_name
+            outputFile['direct_stageout'] = direct
             found_output = True
             break
 
     if not found_output:
         full_report['SEName'] = se_name
+        full_report['direct_stageout'] = direct
         try:
             full_report['log_size'] = os.stat(dest_file).st_size
         except:
@@ -143,6 +146,105 @@ def set_se_name(dest_file, se_name):
 
     with open("jobReport.json.%d" % id, "w") as fd:
         json.dump(full_report, fd)
+
+
+def performTransfer(manager, stageout_policy, source, dest, direct_pfn, direct_se):
+    result = -1
+    for policy in stageout_policy:
+        if policy == "local":
+            print "== Attempting local stageout at %s. ==" % time.ctime()
+            result = performLocalTransfer(manager, source, dest)
+            if result:
+                print "== ERROR: Local stageout resulted in status %d at %s. ==" % (result, time.ctime())
+            else:
+                print "== Local stageout succeeded at %s. ==" % time.ctime()
+                break
+        elif policy == "remote":
+            print "== Attempting remote stageout at %s. ==" % time.ctime()
+            result = performDirectTransfer(source, direct_pfn, direct_se)
+            if result:
+                print "== ERROR: Remote stageout resulted in status %d at %s. =="
+            else:
+                print "== Remote stageout succeeded at %s. ==" % time.ctime()
+                break
+        else:
+            print "== ERROR: Skipping unknown policy named '%s'. ==" % policy
+    if result == -1:
+        print "== FATAL ERROR: No stageout policy was attempted. =="
+        result = 60307
+    return result
+
+
+def performLocalTransfer(manager, source, dest):
+    fileForTransfer = {'LFN': dest, 'PFN': source}
+    signal.signal(signal.SIGALRM, alarmHandler)
+    signal.alarm(waitTime)
+    result = 0
+    try:
+        # Throws on any failure
+        stageout_info = manager(fileForTransfer)
+    except Alarm:
+        print "Indefinite hang during stageOut of %s" % dest
+        manager.cleanSuccessfulStageOuts()
+        result = 60403
+    except Exception, ex:
+        print "== Error during stageout: %s" % ex
+        manager.cleanSuccessfulStageOuts()
+        result = 60307
+    finally:
+        signal.alarm(0)
+    if not result:
+        set_se_name(os.path.split(dest)[-1], stageout_info['SEName'])
+    return result
+
+
+def performDirectTransfer(source, direct_pfn, direct_se):
+    try:
+        return performDirectTransferImpl(source, direct_pfn, direct_se)
+    except WMException.WMException, ex:
+        print "Error during direct stageout: %s" % str(ex)
+        return ex.data.get("ErrorCode", 60307)
+
+
+def performDirectTransferImpl(source, direct_pfn, direct_se):
+    command = "srmv2-lcg"
+    
+    try:
+        impl = retrieveStageOutImpl(command)
+    except Exception, ex:
+        msg = "Unable to retrieve impl for local stage out:\n"
+        msg += "Error retrieving StageOutImpl for command named: %s\n" % (
+            command,)
+        raise StageOutFailure(msg, Command = command,
+                              LFN = direct_pfn, ExceptionDetail = str(ex))
+
+    impl.numRetries = numberOfRetries
+    impl.retryPause = retryPauseTime
+
+    signal.alarm(waitTime)
+    result = 0
+    try:
+        impl("srmv2", source, direct_pfn, None, None)
+    except Alarm:
+        print "== Indefinite hang during stageOut of %s; setting return code to 60403." % dest
+        result = 60403
+    except Exception, ex:
+        msg = "== Failure for local stage out:\n"
+        msg += str(ex)
+        try:
+            msg += traceback.format_exc()
+        except AttributeError, ex:
+            msg += "Traceback unavailable\n"
+        raise StageOutFailure(msg, Command = command, Protocol = protocol,
+                              LFN = lfn, InputPFN = localPfn,
+                              TargetPFN = pfn)
+    finally:
+        signal.alarm(0)
+
+    if not result:
+        set_se_name(os.path.split(direct_pfn)[-1], direct_se, direct=True)
+
+    return result
 
 
 def main():
