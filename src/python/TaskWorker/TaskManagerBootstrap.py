@@ -12,6 +12,7 @@ import classad
 import TaskWorker.Actions.DBSDataDiscovery as DBSDataDiscovery
 import TaskWorker.Actions.Splitter as Splitter
 import TaskWorker.Actions.DagmanCreator as DagmanCreator
+import TaskWorker.Actions.TestPostJob as TestPostJob
 import TaskWorker.Actions.PostJob as PostJob
 import TaskWorker.Actions.PreJob as PreJob
 import TaskWorker.Actions.Final as Final
@@ -23,7 +24,7 @@ def bootstrap():
     print "Entering TaskManagerBootstrap with args: %s" % sys.argv
     command = sys.argv[1]
     if command == "POSTJOB":
-        return PostJob.PostJob().execute(*sys.argv[2:])
+        return TestPostJob.TestPostJob().execute(*sys.argv[2:])
     elif command == "PREJOB":
         return PreJob.PreJob().execute(*sys.argv[2:])
     elif command == "FINAL":

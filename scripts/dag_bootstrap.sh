@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 
+#
 # This script bootstraps the WMCore environment
 #
 set -x
@@ -30,7 +30,7 @@ then
 	if [[ "X$CRAB_TASKMANAGER_TARBALL" == "X" ]]; then
 		CRAB_TASKMANAGER_TARBALL="http://hcc-briantest.unl.edu/$TARBALL_NAME"
 	fi
-    
+
 	if [[ "X$CRAB_TASKMANAGER_TARBALL" != "Xlocal" ]]; then
 		# pass, we'll just use that value
 		echo "Downloading tarball from $CRAB_TASKMANAGER_TARBALL"
@@ -43,7 +43,7 @@ then
 	else
 		echo "Using tarball shipped within condor"
 	fi
-    	
+
 	tar xvfzm TaskManagerRun.tar.gz
 	if [[ $? != 0 ]]
 	then
