@@ -230,7 +230,7 @@ class DagmanSubmitter(TaskAction.TaskAction):
         schedd = ""
         try:
             self.logger.debug("Duplicate check is getting the schedd obj. Collector is: %s", task['tm_collector'])
-            schedd, _address = loc.getScheddObjNew(task['tm_schedd'])
+            schedd, dummyAddress = loc.getScheddObjNew(task['tm_schedd'])
             self.logger.debug("Got schedd obj for %s ", task['tm_schedd'])
         except Exception as exp:
             msg = "The CRAB server backend was not able to contact the Grid scheduler."
