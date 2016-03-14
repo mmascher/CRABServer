@@ -131,7 +131,7 @@ class DagmanSubmitter(TaskAction.TaskAction):
         scheddStats.procnum = kwargs['procnum']
 
     def execute(self, *args, **kwargs):
-        userServer = HTTPRequests(self.server['host'], kwargs['task']['user_proxy'], kwargs['task']['user_proxy'], retry=2, logger=self.logger)
+        userServer = HTTPRequests(self.server['host'], kwargs['task']['user_proxy'], kwargs['task']['user_proxy'], retry=60, logger=self.logger)
         retryIssuesBySchedd = {}
         goodSchedulers = []
         try:
