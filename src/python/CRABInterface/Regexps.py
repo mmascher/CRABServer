@@ -96,3 +96,37 @@ RX_SUBGETWORKER = re.compile(r"jobgroup")
 
 # Schedulers
 RX_SCHEDULER = re.compile(r"^panda|condor$")
+
+
+
+
+
+# File Transfers api
+RX_SUBPOSTTRANSFER = re.compile(r"^acquireTransfers|acquirePublication|updateTransfers|retryPublication|retryTransfers|killTransfers$")
+RX_SUBGETTRANSFER = re.compile(r"^acquiredTransfers|acquiredPublication|getVOMSAttributesForTask|groupedTransferStatistics|groupedPublishStatistics$")
+RX_USERGROUP = RX_ANYTHING
+RX_USERROLE = RX_ANYTHING
+# 0 - False
+# 1 - True
+RX_PUBLICATION_STATE = re.compile(r"^[01]")
+# 0 - new
+# 1 - acquired
+# 2 - failed
+# 3 - done
+# 4 - retry
+# 5 - submitted
+# 6 - kill
+# 7 - killed
+RX_TRANSFER_STATE = re.compile(r"^[01234567]")
+# 0 - new
+# 1 - acquired
+# 2 - failed
+# 3 - done
+# 4 - retry
+RX_PUBLISH_STATE = re.compile(r"^[01234]")
+RX_ASO_WORKERNAME = RX_WORKER_NAME
+
+RX_SUBGETUSERTRANSFER = re.compile(r"^getById|getTransferStatus|getPublicationStatus$")
+RX_SUBPOSTUSERTRANSFER = re.compile(r"^killTransfers|retryPublication|retryTransfers|killTransfersById$")
+
+

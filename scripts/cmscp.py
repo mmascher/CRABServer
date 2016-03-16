@@ -9,6 +9,7 @@ import sys
 import re
 import json
 import time
+import urllib
 import pprint
 import signal
 import logging
@@ -20,8 +21,8 @@ import traceback
 if os.path.exists("WMCore.zip") and "WMCore.zip" not in sys.path:
     sys.path.append("WMCore.zip")
 
-from ServerUtilities import cmd_exist, parseJobAd
-
+from ServerUtilities import cmd_exist, parseJobAd, TRANSFERDB_STATES
+from RESTInteractions import HTTPRequests
 if 'http_proxy' in os.environ and not os.environ['http_proxy'].startswith("http://"):
     os.environ['http_proxy'] = "http://%s" % (os.environ['http_proxy'])
 
@@ -605,6 +606,104 @@ def inject_to_aso(file_transfer_info):
     msg = "Stageout request document so far:\n%s" % (pprint.pformat(doc_new_info))
     print(msg)
 
+    if 'UseCRABServerForTransfer' in G_JOB_AD and G_JOB_AD['UseCRABServerForTransfer']:
+        cur_retval, cur_retmsg = upload_to_crabserver(doc_id, doc_new_info, file_transfer_info, publish, file_type)
+    else:
+        cur_retval, cur_retmsg = upload_to_couch(doc_id, doc_new_info, file_transfer_info, publish, file_type, role, group)
+    return cur_retval, cur_retmsg
+
+
+def upload_to_crabserver(doc_id, doc_new_info, file_transfer_info, publish, file_type):
+    server = HTTPRequests(G_JOB_AD['CRAB_RestHost'], os.environ['X509_USER_PROXY'], os.environ['X509_USER_PROXY'], retry=2)
+    rest_uri = G_JOB_AD['CRAB_RestURInoAPI'] + "/fileusertransfers"
+    # There are 2 flags. commit - is to insert new document, update - is to update document. It should not be ever
+    # that both are equal to True.
+    global G_NOW_EPOCH
+    needs_commit = True
+    needs_update = False
+    try:
+        # It does not raise an error if id does not exist. In that case it returns empty output.
+        # If output is not empty, we do double check!
+        docInfo = server.get(rest_uri, data={'subresource': 'getById', "id": doc_id})
+        if docInfo and len(docInfo[0]['result']) == 1:
+            # Means that we have already a document in database!
+            docInfo = dict(zip(docInfo[0]['desc']['columns'], docInfo[0]['result'][0]))
+            msg = "LFN %s (id %s) is already in ASO database (file transfer status is '%s')."
+            msg = msg % (file_transfer_info['source']['lfn'], doc_id, TRANSFERDB_STATES[docInfo['tm_transfer_state']])
+            if TRANSFERDB_STATES[docInfo['tm_transfer_state']] == ['NEW', 'ACQUIRED', 'SUBMITTED', 'RETRY']:
+                msg += "\nFile transfer status is not terminal ('done', 'failed' or 'killed')."
+                msg += " Will not upload a new stageout request for the current job retry."
+                needs_commit = False
+            else:
+                needs_commit = False
+                needs_update = True
+        else:
+            msg += " Uploading new stageout request for the current job retry."
+        print(msg)
+    except HTTPException as hte:
+        msg  = "Error loading document from database."
+        msg += " Transfer submission failed."
+        msg += "\n%s" % (str(hte.headers))
+        print(msg)
+        return 60320, msg
+    if needs_commit and not needs_update:
+        # This means that there is no document uploaded with this hashID. So we will upload new one.
+        newDoc = {'id': doc_id,
+                  'username': G_JOB_AD['CRAB_UserHN'],
+                  'taskname': G_JOB_AD['CRAB_ReqName'],
+                  'start_time': G_NOW_EPOCH,
+                  'destination': doc_new_info['destination'],
+                  'destination_lfn': file_transfer_info['destination']['lfn'],
+                  'source': doc_new_info['source'],
+                  'source_lfn': file_transfer_info['source']['lfn'],
+                  'filesize': doc_new_info['size'],
+                  'publish': publish,
+                  'transfer_state': 'NEW',
+                  'publication_state': 'NEW' if publish else 'NOT_REQUIRED',
+                  'job_id': G_JOB_AD['CRAB_Id'],
+                  'job_retry_count': G_JOB_AD.get('CRAB_Retry', -1),
+                  'type': file_type,
+                  'rest_host': G_JOB_AD['CRAB_RestHost'],
+                  'rest_uri': G_JOB_AD['CRAB_RestURInoAPI']}
+        try:
+            server.put(rest_uri, data=urllib.urlencode(newDoc))
+            setASOStartTime()
+        except HTTPException as hte:
+            msg  = "Error uploading document to database."
+            msg += " Transfer submission failed."
+            msg += "\n%s" % (str(hte.headers))
+            print(msg)
+            return 60320, msg
+    elif not needs_commit and needs_update:
+        # This means that there is a document and we have to update it
+        newDoc = {'id': doc_id,
+                  'username': G_JOB_AD['CRAB_UserHN'],
+                  'taskname': G_JOB_AD['CRAB_ReqName'],
+                  'start_time': G_NOW_EPOCH,
+                  'source': doc_new_info['source'],
+                  'source_lfn': file_transfer_info['source']['lfn'],
+                  'filesize': doc_new_info['size'],
+                  'transfer_state': 'NEW',
+                  'publication_state': 'NEW' if publish else 'NOT_REQUIRED',
+                  'job_id': G_JOB_AD['CRAB_Id'],
+                  'job_retry_count': G_JOB_AD.get('CRAB_Retry', -1),
+                  'subresource': 'updateDoc'}
+        try:
+            server.post(rest_uri, data=urllib.urlencode(newDoc))
+            setASOStartTime()
+        except HTTPException as hte:
+            msg  = "Error uploading document to database."
+            msg += " Transfer submission failed."
+            msg += "\n%s" % (str(hte.headers))
+            print(msg)
+            return 60320, msg
+    else:
+        msg = "You should not be here!. Something is wrong with cmscp and upload to CS"
+        return 60320, msg
+    return 0, None
+
+
+def upload_to_couch(doc_id, doc_new_info, file_transfer_info, publish, file_type, role, group):
     couch_server = CMSCouch.CouchServer(dburl = G_JOB_AD['CRAB_ASOURL'], \
                                         ckey = os.environ['X509_USER_PROXY'], \
                                         cert = os.environ['X509_USER_PROXY'])
@@ -676,22 +775,28 @@ def inject_to_aso(file_transfer_info):
             return 60320, msg
         msg = "Final stageout job description:\n%s" % (pprint.pformat(doc))
         print(msg)
-        if get_from_job_report('aso_start_time') is None or \
-           get_from_job_report('aso_start_timestamp') is None:
-            msg  = "Setting"
-            msg += " aso_start_time = %s" % (G_NOW)
-            msg += " and"
-            msg += " aso_start_time_stamp = %s" % (G_NOW_EPOCH)
-            msg += " in job report."
-            print(msg)
-            is_ok = add_to_job_report([('aso_start_time', G_NOW), \
-                                       ('aso_start_timestamp', G_NOW_EPOCH)])
-            if not is_ok:
-                msg = "WARNING: Failed to set aso_start_time in job report."
-                print(msg)
+        setASOStartTime()
     return 0, None
 
 ## = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
+
+
+def setASOStartTime():
+    if get_from_job_report('aso_start_time') is None or \
+       get_from_job_report('aso_start_timestamp') is None:
+        msg  = "Setting"
+        msg += " aso_start_time = %s" % (G_NOW)
+        msg += " and"
+        msg += " aso_start_time_stamp = %s" % (G_NOW_EPOCH)
+        msg += " in job report."
+        print(msg)
+        is_ok = add_to_job_report([('aso_start_time', G_NOW), \
+                                   ('aso_start_timestamp', G_NOW_EPOCH)])
+        if not is_ok:
+            msg = "WARNING: Failed to set aso_start_time in job report."
+            print(msg)
+
+
 
 def perform_direct_stageout(direct_stageout_impl, \
                             direct_stageout_command, direct_stageout_protocol, \
@@ -1754,10 +1859,13 @@ def main():
     ##--------------------------------------------------------------------------
 
     ##--------------------------------------------------------------------------
-    ## Start INJECTION TO ASO
+    ## Start INJECTION FOR ASO
     ##--------------------------------------------------------------------------
     ## Do the injection of the transfer request documents to the ASO database
     ## only if all the local or direct stageouts have succeeded.
+    ##--------------------------------------------------------------------------
+    ## From new release it is a configuration parameter should it inject to CouchDB or Oracle
+    ## Configuration parameter is forwarded with JOB_AD and it is UseCRABServerForTransfer flag
     condition_inject_outputs = (cmscp_status['outputs_stageout']['local']['return_code'] == 0 and \
                                 cmscp_status['outputs_stageout']['remote']['return_code'] != 0)
     not_inject_msg_outputs = ''
