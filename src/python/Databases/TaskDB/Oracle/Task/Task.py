@@ -115,6 +115,7 @@ class Task(object):
     SetInjectedTasks_sql = """UPDATE tasks SET tm_end_injection = SYS_EXTRACT_UTC(SYSTIMESTAMP), \
                              tm_task_status = upper(:tm_task_status), \
                              panda_resubmitted_jobs = :resubmitted_jobs \
+                             clusterid = :clusterid \
                              WHERE tm_taskname = :tm_taskname""" 
    
     #SetJobSetId
