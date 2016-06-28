@@ -11,6 +11,7 @@ from __future__ import print_function
 from __future__ import division
 import unittest
 
+import os
 import time
 import string
 import random
@@ -29,7 +30,7 @@ class FileTransfersTest(unittest.TestCase):
         """
         Setup for unit tests
         """
-        self.server = HTTPRequests('balcas-crab2.cern.ch', '/data/certs/servicecert.pem', '/data/certs/servicekey.pem')
+        self.server = HTTPRequests(os.environ['SERVER_HOST'], os.environ['X509_USER_PROXY'], os.environ['X509_USER_PROXY'])
         self.lfnBase = '/store/temp/user/%s/my_cool_dataset-%s/file-%s-%s.root'
         self.fileDoc = {'id': 'OVERWRITE',
                         'username': 'OVERWRITE',
@@ -55,9 +56,9 @@ class FileTransfersTest(unittest.TestCase):
 
     def testFileTransferPUT(self):
         """
-        _testApmonSend_
+        _testFileTransferPUT_
 
-        Just test simple apmonSend with fake data
+        Just test simple testFileTransferPUT with fake data
         """
         # We just sent fake data which is not monitored by dashboard.
         # Also only the first time to decide is publication ON or NOT
