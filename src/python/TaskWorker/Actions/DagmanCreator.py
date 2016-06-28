@@ -12,7 +12,6 @@ import string
 import tarfile
 import hashlib
 import commands
-import tempfile
 from ast import literal_eval
 from httplib import HTTPException
 
@@ -130,7 +129,7 @@ Arguments = "-a $(CRAB_Archive) --sourceURL=$(CRAB_ISB) --jobNumber=$(CRAB_Id) -
 transfer_input_files = CMSRunAnalysis.sh, cmscp.py%(additional_input_file)s
 transfer_output_files = jobReport.json.$(count)
 # TODO: fold this into the config file instead of hardcoding things.
-Environment = SCRAM_ARCH=$(CRAB_JobArch);%(additional_environment_options)s
+Environment = "SCRAM_ARCH=$(CRAB_JobArch) %(additional_environment_options)s"
 should_transfer_files = YES
 #x509userproxy = %(x509up_file)s
 use_x509userproxy = true
@@ -370,12 +369,14 @@ class DagmanCreator(TaskAction.TaskAction):
             if arch == "amd64":
                 info['desired_arch'] = "X86_64"
 
+
     def getDashboardTaskType(self):
         """ Get the dashboard activity name for the task.
         """
         if self.task['tm_activity'] in (None, ''):
             return getattr(self.config.TaskWorker, 'dashboardTaskType', 'analysistest')
         return self.task['tm_activity']
+
 
     def makeJobSubmit(self, task):
         """
@@ -449,11 +450,11 @@ class DagmanCreator(TaskAction.TaskAction):
             info['additional_environment_options'] += 'CRAB_RUNTIME_TARBALL=local'
             info['additional_input_file'] += ", CMSRunAnalysis.tar.gz"
         else:
-            info['additional_environment_options'] += 'CRAB_RUNTIME_TARBALL=http://hcc-briantest.unl.edu/CMSRunAnalysis-3.3.0-pre1.tar.gz'
+            raise TaskWorkerException("Cannot find CMSRunAnalysis.tar.gz inside the cwd: %s" % os.getcwd())
         if os.path.exists("TaskManagerRun.tar.gz"):
-            info['additional_environment_options'] += ';CRAB_TASKMANAGER_TARBALL=local'
+            info['additional_environment_options'] += ' CRAB_TASKMANAGER_TARBALL=local'
         else:
-            info['additional_environment_options'] += ';CRAB_TASKMANAGER_TARBALL=http://hcc-briantest.unl.edu/TaskManagerRun-3.3.0-pre1.tar.gz'
+            raise TaskWorkerException("Cannot find TaskManagerRun.tar.gz inside the cwd: %s" % os.getcwd())
         if os.path.exists("sandbox.tar.gz"):
             info['additional_input_file'] += ", sandbox.tar.gz"
         info['additional_input_file'] += ", run_and_lumis.tar.gz"
@@ -541,6 +542,7 @@ class DagmanCreator(TaskAction.TaskAction):
                        }
             dagSpecs.append(nodeSpec)
             self.logger.debug(dagSpecs[-1])
+
         return dagSpecs, i
 
 
@@ -808,6 +810,7 @@ class DagmanCreator(TaskAction.TaskAction):
 
         return info, splitterResult
 
+
     def extractMonitorFiles(self, inputFiles, **kw):
         """
         Ops mon needs access to some files from sandbox.tar.gz.
@@ -838,6 +841,7 @@ class DagmanCreator(TaskAction.TaskAction):
                     kw['task']['user_proxy'], kw['task']['tm_taskname'])
 
         return
+
 
     def executeInternal(self, *args, **kw):
         # FIXME: In PanDA, we provided the executable as a URL.
@@ -883,8 +887,8 @@ class DagmanCreator(TaskAction.TaskAction):
         if kw['task']['tm_dry_run'] == 'F':
             params = self.sendDashboardTask()
 
-        inputFiles = ['gWMS-CMSRunAnalysis.sh', 'CMSRunAnalysis.sh', 'cmscp.py', 'RunJobs.dag', 'Job.submit', 'dag_bootstrap.sh', \
-                'AdjustSites.py', 'site.ad', 'site.ad.json', 'run_and_lumis.tar.gz', 'input_files.tar.gz']
+        inputFiles = ['gWMS-CMSRunAnalysis.sh', 'CMSRunAnalysis.sh', 'cmscp.py', 'RunJobs.dag', 'Job.submit', 'dag_bootstrap.sh',
+                      'AdjustSites.py', 'site.ad', 'site.ad.json', 'run_and_lumis.tar.gz', 'input_files.tar.gz']
 
         self.extractMonitorFiles(inputFiles, **kw)
 
@@ -894,28 +898,21 @@ class DagmanCreator(TaskAction.TaskAction):
             inputFiles.append("CMSRunAnalysis.tar.gz")
         if os.path.exists("TaskManagerRun.tar.gz"):
             inputFiles.append("TaskManagerRun.tar.gz")
+        if kw['task']['tm_input_dataset']:
+            inputFiles.append("input_dataset_lumis.json")
+            inputFiles.append("input_dataset_duplicate_lumis.json")
 
         info, splitterResult = self.createSubdag(*args, **kw)
 
         return info, params, inputFiles, splitterResult
 
-    def execute(self, *args, **kw):
-        cwd = None
-        try:
-            if hasattr(self.config, 'TaskWorker') and hasattr(self.config.TaskWorker, 'scratchDir'):
-                temp_dir = tempfile.mkdtemp(prefix='_' + kw['task']['tm_taskname'], dir=self.config.TaskWorker.scratchDir)
-                cwd = os.getcwd()
-                os.chdir(temp_dir)
-                kw['task']['scratch'] = temp_dir
-            else:
-                #I prefer to raise Exception and not TaskWorkerException since I want the whole stacktrace to be printed just in case
-                #this gets propagated to the client (should never happen in production as we test this before)
-                raise Exception(("The 'scratchDir' parameter is not set in the config.TaskWorker section of the configuration file."
-                                           " Please set config.TaskWorker.scratchDir in your Task Worker configuration"))
 
+    def execute(self, *args, **kw):
+        cwd = os.getcwd()
+        try:
+            os.chdir(kw['tempDir'])
             info, params, inputFiles, splitterResult = self.executeInternal(*args, **kw)
-            return TaskWorker.DataObjects.Result.Result(task = kw['task'], result = (temp_dir, info, params, inputFiles, splitterResult))
+            return TaskWorker.DataObjects.Result.Result(task = kw['task'], result = (info, params, inputFiles, splitterResult))
         finally:
-            if cwd:
-                os.chdir(cwd)
+            os.chdir(cwd)
 
