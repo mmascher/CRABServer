@@ -80,7 +80,7 @@ RX_WORKER_NAME = re.compile(r"^[A-Za-z0-9\-\._]{1,100}$")
 ## this can be improved by putting a dependency on CAFUtilities task state machine
 RX_STATUS = re.compile(r"^[A-Za-z_]{1,20}$")
 
-RX_USERNAME = re.compile(r"^[A-Za-z_0-9]{1,20}$")
+RX_USERNAME = re.compile(r"^[A-Za-z_:0-9]{1,100}$")
 RX_DATE = re.compile(r"^(19|20)\d\d[- /.](0[1-9]|1[012])[- /.](0[1-9]|[12][0-9]|3[01])$")
 
 RX_ASOURL = RX_DBSURL
@@ -102,7 +102,7 @@ RX_SCHEDULER = re.compile(r"^panda|condor$")
 
 
 # File Transfers api
-RX_SUBPOSTTRANSFER = re.compile(r"^acquireTransfers|acquirePublication|updateTransfers|retryPublication|retryTransfers|killTransfers$")
+RX_SUBPOSTTRANSFER = re.compile(r"^acquireTransfers|acquirePublication|updateTransfers|updatePublication|retryPublication|retryTransfers|killTransfers$")
 RX_SUBGETTRANSFER = re.compile(r"^acquiredTransfers|acquiredPublication|getVOMSAttributesForTask|groupedTransferStatistics|groupedPublishStatistics$")
 RX_USERGROUP = RX_ANYTHING
 RX_USERROLE = RX_ANYTHING

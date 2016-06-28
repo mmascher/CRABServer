@@ -83,6 +83,9 @@ def USER_SANDBOX_EXCLUSIONS(tarmembers):
         return ['debug/crabConfig.py', 'debug/originalPSet.py.py']
 
 
+def isCouchDBURL(url):
+    return 'couchdb' in url
+
 def checkOutLFN(lfn, username):
     if lfn.startswith('/store/user/'):
         if lfn.split('/')[3] != username:

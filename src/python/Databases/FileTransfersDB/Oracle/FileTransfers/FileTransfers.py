@@ -19,25 +19,28 @@ class FileTransfers(object):
                        :transfer_max_retry_count, :publication_max_retry_count, :start_time)"
 
     AcquireTransfers_sql = "UPDATE filetransfersdb SET tm_aso_worker = :asoworker, \
-                                                       tm_last_update = :last_update, \
-                                                       transfer_state = :new_transfer_state \
-                            WHERE tm_aso_worker IS EMPTY AND \
-                                  transfer_state = :transfer_state \
-                            ORDER BY tm_last_update \
-                            LIMIT :limit"
+                               tm_last_update = :last_update, \
+                               tm_transfer_state = :new_transfer_state \
+                            WHERE tm_aso_worker IS NULL AND \
+                                  tm_transfer_state = :transfer_state AND \
+                                  rownum <= :limit"
 
-    AcquirePublication_sql = "UPDATE filetransfersdb SET tm_aso_worker = :asoworker, \
-                                                       tm_last_update = :last_update, \
-                                                       publication_state = :new_publication_state \
-                              WHERE transfer_state = :transfer_done AND \
-                                    publish = :publish_flag AND \
-                                    publication_state = :publication_state \
-                              LIMIT :limit"
+    AcquirePublication_sql = "UPDATE filetransfersdb SET tm_last_update = :last_update, \
+                                                         tm_publication_state = :new_publication_state \
+                              WHERE tm_aso_worker = :asoworker AND \
+				    tm_transfer_state = :transfer_state AND \
+                                    tm_publish = :publish_flag AND \
+                                    tm_publication_state = :publication_state" 
 
     UpdateTransfers_sql = "UPDATE filetransfersdb SET tm_transfer_state = :transfer_state, \
-                                                      tm_last_update = :last_update \
+                                                      tm_last_update = :last_update, \
+						      tm_transfer_failure_reason = :fail_reason, \
+						      tm_transfer_retry_count = tm_transfer_retry_count + :retry_value, \
+						      tm_fts_id = CASE WHEN :fts_id is NULL THEN tm_fts_id ELSE :fts_id END,\
+						      tm_fts_instance = CASE WHEN :fts_instance is NULL THEN tm_fts_id ELSE :fts_instance END,\
                            WHERE tm_id = :id AND \
                                  tm_aso_worker = :asoworker"
+
 
     UpdateTransfers1_sql = "UPDATE filetransfersdb SET tm_transfer_state = :transfer_state, \
                                                        tm_last_update = :last_update, \
@@ -47,7 +50,9 @@ class FileTransfers(object):
                                   tm_aso_worker = :asoworker"
 
     UpdatePublication_sql = "UPDATE filetransfersdb SET tm_publication_state = :publication_state, \
-                                                        tm_last_update = :last_update \
+                                                        tm_last_update = :last_update, \
+							tm_publication_failure_reason = :fail_reason, \
+							tm_publication_retry_count = tm_publication_retry_count + :retry_value \
                              WHERE tm_id = :id AND \
                                    tm_aso_worker = :asoworker"
 
@@ -66,8 +71,8 @@ class FileTransfers(object):
                                                      tm_transfer_retry_count = tm_transfer_retry_count + 1 \
                           WHERE tm_transfer_state = :transfer_state AND \
                                 tm_aso_worker = :asoworker AND \
-                                tm_last_update < :last_retry AND \
-                                tm_transfer_max_retry_count <= tm_transfer_retry_count"
+                                (:last_update - tm_last_update) > :time_to AND \
+                                tm_transfer_max_retry_count >= tm_transfer_retry_count"
 
     KillTransfers_sql = "UPDATE filetransfersdb SET tm_transfer_state = :new_transfer_state, \
                                                     tm_last_update = :last_update, \
@@ -75,54 +80,60 @@ class FileTransfers(object):
                                tm_transfer_state = :transfer_state"
 
 # Move to taskDB
-    GetVOMSAttr_sql = "SELECT tm_role, tm_group from filetransfersdb WHERE tm_taskname = :taskname AND ROWNUM = 1"
+    GetVOMSAttr_sql = "SELECT tm_user_role, tm_user_group from tasks WHERE tm_taskname = :taskname AND ROWNUM = 1"
 
-
-    GetDocsTransfer0_sql = "SELECT * FROM filetransfersdb \
-                            WHERE tm_username = :username AND \
-                                  tm_transfer_state = :state AND \
+    GetDocsTransfer0_sql = "SELECT f.*, t.tm_user_role, t.tm_user_group \
+			    FROM filetransfersdb f \
+			    LEFT OUTER JOIN tasks t ON t.tm_taskname = f.tm_taskname \
+                            WHERE tm_transfer_state = :state AND \
                                   tm_aso_worker = :asoworker AND \
                                   rownum < :limit \
-                            ORDER BY tm_row_num"
+                            ORDER BY rownum"
 
-    GetDocsTransfer1_sql = "SELECT * FROM filetransfersdb \
-                            WHERE tm_username = :username AND \
-                                  tm_transfer_state = :state AND \
-                                  tm_taskname = :taskname AND \
-                                  tm_aso_worker = :asoworker AND \
+    GetDocsTransfer1_sql = "SELECT f.*, t.tm_user_role, t.tm_user_group \
+			    FROM filetransfersdb f \
+			    LEFT OUTER JOIN tasks t ON t.tm_taskname = f.tm_taskname \
+                            WHERE f.tm_transfer_state = :state AND \
+                                  f.tm_username = :username AND \
+                                  f.tm_aso_worker = :asoworker AND \
                                   rownum < :limit \
-                            ORDER BY tm_row_num"
+                            ORDER BY rownum"
 
     GetDocsTransfer2_sql = "SELECT * FROM filetransfersdb \
-                            WHERE tm_username = :username AND \
-                                  tm_transfer_state = :state AND \
+                            WHERE tm_transfer_state = :state AND \
                                   tm_source = :source AND \
                                   tm_aso_worker = :asoworker AND \
                                   rownum < :limit \
-                            ORDER BY tm_row_num"
+                            ORDER BY rownum"
 
     GetDocsTransfer3_sql = "SELECT * FROM filetransfersdb \
-                            WHERE tm_username = :username AND \
-                                  tm_transfer_state = :state AND \
+                            WHERE tm_transfer_state = :state AND \
                                   tm_source = :source AND \
                                   tm_destination = :destination AND \
                                   tm_aso_worker = :asoworker AND \
                                   rownum < :limit \
-                            ORDER BY tm_row_num"
+                            ORDER BY rownum"
 
-    GetDocsPublication0_sql = "SELECT * FROM filetransfersdb \
-                               WHERE tm_username = :username AND \
+    GetDocsPublication0_sql = "SELECT f.*, t.tm_user_role, t.tm_user_group, \
+				      t.tm_input_dataset, t.tm_cache_url, \
+				      t.tm_dbs_url \
+			       FROM filetransfersdb f \
+			       LEFT OUTER JOIN tasks t ON t.tm_taskname = f.tm_taskname \
+                               WHERE tm_publication_state = :state AND \
+                                     tm_aso_worker = :asoworker AND \
+                                     rownum < :limit \
+                               ORDER BY rownum"
+
+    GetDocsPublication1_sql = "SELECT f.*, t.tm_user_role, t.tm_user_group, \
+				      t.tm_input_dataset, t.tm_cache_url, \
+				      t.tm_dbs_url \
+			       FROM filetransfersdb f \
+			       LEFT OUTER JOIN tasks t ON t.tm_taskname = f.tm_taskname \
+                               WHERE f.tm_username = :username AND \
                                      tm_publication_state = :state AND \
                                      tm_aso_worker = :asoworker AND \
                                      rownum < :limit \
-                               ORDER BY tm_row_num"
-    GetDocsPublication1_sql = "SELECT * FROM filetransfersdb \
-                               WHERE tm_username = :username AND \
-                                     tm_publication_state = :state AND \
-                                     tm_taskname = :taskname AND \
-                                     tm_aso_worker = :asoworker AND \
-                                     rownum < :limit \
-                               ORDER BY tm_row_num"
+                               ORDER BY rownum"
 
     GetGroupedTransferStatistics0_sql = "SELECT count(*) as count, tm_aso_worker, tm_transfer_state FROM filetransfersdb \
                                          GROUP BY tm_aso_worker, tm_transfer_state"

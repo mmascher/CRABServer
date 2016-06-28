@@ -74,7 +74,7 @@ if [[ "x$RPM_RELEASE" != "x" ]]; then
     popd
 
     mkdir -p bin
-    cp $ORIGDIR/scripts/{TweakPSet.py,CMSRunAnalysis.py,DashboardFailure.sh} .
+    cp -r $ORIGDIR/scripts/{TweakPSet.py,CMSRunAnalysis.py,DashboardFailure.sh} .
     cp $ORIGDIR/src/python/{ApmonIf.py,DashboardAPI.py,Logger.py,ProcInfo.py,apmon.py,ServerUtilities.py,CMSGroupMapper.py,RESTInteractions.py} .
 
 else
@@ -143,7 +143,7 @@ else
     popd
 
     mkdir -p bin
-    cp $CRABSERVER_PATH/scripts/{TweakPSet.py,CMSRunAnalysis.py,DashboardFailure.sh} .
+    cp -r $CRABSERVER_PATH/scripts/{TweakPSet.py,CMSRunAnalysis.py,DashboardFailure.sh} .
     cp $CRABSERVER_PATH/src/python/{ApmonIf.py,DashboardAPI.py,Logger.py,ProcInfo.py,apmon.py,ServerUtilities.py,CMSGroupMapper.py,RESTInteractions.py} .
 fi
 

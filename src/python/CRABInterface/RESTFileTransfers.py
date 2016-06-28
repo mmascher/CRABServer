@@ -41,6 +41,8 @@ class RESTFileTransfers(RESTEntity):
             validate_str("asoworker", param, safe, RX_ASO_WORKERNAME, optional=False)
             validate_str("list_of_ids", param, safe, RX_ANYTHING, optional=True)
             validate_str("list_of_transfer_state", param, safe, RX_ANYTHING, optional=True)
+            validate_str("list_of_failure_reason", param, safe, RX_ANYTHING, optional=True)
+            validate_str("list_of_retry_value", param, safe, RX_ANYTHING, optional=True)
             validate_str("list_of_fts_instance", param, safe, RX_ANYTHING, optional=True)
             validate_str("list_of_fts_id", param, safe, RX_ANYTHING, optional=True)
             validate_str("list_of_publication_state", param, safe, RX_ANYTHING, optional=True)
@@ -48,8 +50,8 @@ class RESTFileTransfers(RESTEntity):
 
         elif method in ['GET']:
             validate_str("subresource", param, safe, RX_SUBGETTRANSFER, optional=False)
-            validate_str("username", param, safe, RX_TASKNAME, optional=True)
-            validate_str("taskname", param, safe, RX_USERNAME, optional=True)
+            validate_str("username", param, safe, RX_USERNAME, optional=True)
+            validate_str("taskname", param, safe, RX_TASKNAME, optional=True)
             validate_str("destination", param, safe, RX_CMSSITE, optional=True)
             validate_str("source", param, safe, RX_CMSSITE, optional=True)
             validate_str("asoworker", param, safe, RX_ASO_WORKERNAME, optional=True)
@@ -68,9 +70,9 @@ class RESTFileTransfers(RESTEntity):
            Find a description next to each call"""
         subresource = kwargs['subresource']
         binds = {}
-        binds['last_update'] = [int(time.time())]
-        binds['asoworker'] = [kwargs['asoworker']]
         timeNow = int(time.time())
+        binds['last_update'] = [timeNow]
+        binds['asoworker'] = [kwargs['asoworker']]
 
         if subresource == 'acquireTransfers':
             ###############################################
@@ -86,7 +88,7 @@ class RESTFileTransfers(RESTEntity):
             binds['limit'] = [1000]
             binds['transfer_state'] = [TRANSFERDB_STATUSES['NEW']]
             binds['new_transfer_state'] = [TRANSFERDB_STATUSES['ACQUIRED']]
-            self.api.modify(self.transferDB.AcquireTransfers_sql, **binds)
+            self.api.modifynocheck(self.transferDB.AcquireTransfers_sql, **binds)
 
         elif subresource == 'acquirePublication':
             ###############################################
@@ -105,10 +107,11 @@ class RESTFileTransfers(RESTEntity):
             # by meaning if we have 2 ASO concurrent running, each of them can acquire multiple files
             # from same task. Maybe is good to enforce acquire only for tasks which do not have
             # asoworker defined. This would enforce to group files per and lower a bit load on dbs.
+	    binds['publish_flag'] = [1]
             binds['transfer_state'] = [TRANSFERDB_STATUSES['DONE']]
             binds['publication_state'] = [PUBLICATIONDB_STATUSES['NEW']]
             binds['new_publication_state'] = [PUBLICATIONDB_STATUSES['ACQUIRED']]
-            self.api.modify(self.transferDB.AcquirePublication_sql, **binds)
+            self.api.modifynocheck(self.transferDB.AcquirePublication_sql, **binds)
 
         elif subresource == 'updateTransfers':
             ###############################################
@@ -122,6 +125,7 @@ class RESTFileTransfers(RESTEntity):
             # 2 items, Required keys are:
             # ([str, str]) list_of_ids: list of ids which are in database.
             # ([str, str]) list_of_transfer_state: transfer_state which is one of: ['FAILED', 'DONE', 'RETRY', 'SUBMITTED', 'KILLED']
+	    # optional: ([str, str]) list_of_failure_reason 	
             # :::::::
             # 4 items, Required keys are:
             # ([str, str]) list_of_ids: list of ids which are in database.
@@ -133,8 +137,8 @@ class RESTFileTransfers(RESTEntity):
             # (str) asoworker: ASO Worker name for which these transfers there acquired.
             ###############################################
             binds['last_update'] = [timeNow]
-            compareOut, errorMsg = self.compareLen(kwargs, ['list_of_ids', 'list_of_transfer_state', 'list_of_fts_instance', 'list_of_fts_id'])
-            if compareOut:
+            # TODO: fix case: if 'fts_instance' in kwargs	
+            if 'fts_instance' in kwargs:
                 del errorMsg
                 for num in range(kwargs['list_of_ids']):
                     binds['id'] = kwargs['list_of_ids'][num]
@@ -142,13 +146,20 @@ class RESTFileTransfers(RESTEntity):
                     binds['fts_instance'] = kwargs['list_of_fts_instance'][num]
                     binds['fts_id'] = kwargs['list_of_fts_id'][num]
                     self.api.modify(self.transferDB.UpdateTransfers_sql, **binds)
-            compareOut1, errorMsg1 = self.compareLen(kwargs, ['list_of_ids', 'list_of_transfer_state'])
-            if compareOut1:
-                del errorMsg1
-                for num in range(kwargs['list_of_ids']):
-                    binds['id'] = kwargs['list_of_ids'][num]
-                    binds['transfer_state'] = [TRANSFERDB_STATUSES[kwargs['list_of_transfer_state'][num]]]
-                    self.api.modify(self.transferDB.UpdateTransfers_sql, **binds)
+            else:
+                ids = (kwargs['list_of_ids'].translate(None,"[ ]'")).split(",")
+                states = (kwargs['list_of_transfer_state'].translate(None,"[ ]'")).split(",")
+                retry = [0 for x in states]
+                reasons = ["" for x in states]
+                if kwargs['list_of_retry_value'] is not None:
+                    reasons = (kwargs['list_of_failure_reason'].translate(None,"[]'")).split(",")
+                    retry = (kwargs['list_of_retry_value'].translate(None,"[ ]'")).split(",")
+                for num in range(len(ids)):
+                    binds['id'] = [ids[num]]
+                    binds['transfer_state'] = [TRANSFERDB_STATUSES[states[num]]]
+                    binds['fail_reason'] = [reasons[num]]
+                    binds['retry_value'] = [int(retry[num])]
+                    self.api.modifynocheck(self.transferDB.UpdateTransfers_sql, **binds)
 
         elif subresource == 'updatePublication':
             ###############################################
@@ -166,14 +177,23 @@ class RESTFileTransfers(RESTEntity):
             # (str) asoworker: ASO Worker name for which acquire Publication.
             ###############################################
             binds['last_update'] = [timeNow]
-            compareOut, errorMsg = self.compareLen(kwargs, ['list_of_ids', 'list_of_publication_state'])
-            if compareOut:
-                del errorMsg
-                for num in range(kwargs['list_of_ids']):
-                    binds['publication_state'] = PUBLICATIONDB_STATUSES[kwargs['list_of_publication_state'][num]]
-                    binds['id'] = kwargs['list_of_ids'][num]
-                    self.api.modify(self.transferDB.UpdatePublication_sql, **binds)
-
+            #compareOut, errorMsg = self.compareLen(kwargs, ['list_of_ids', 'list_of_publication_state'])
+            #if compareOut:
+            #    del errorMsg
+            ids = (kwargs['list_of_ids'].translate(None,"[ ]'")).split(",")
+	    states = (kwargs['list_of_publication_state'].translate(None,"[ ]'")).split(",")
+	    retry = [0 for x in states]
+	    reasons = ["" for x in states]
+	    if kwargs['list_of_retry_value'] is not None:
+	        reasons = (kwargs['list_of_failure_reason'].translate(None,"[]'")).split(",")
+	        retry = (kwargs['list_of_retry_value'].translate(None,"[ ]'")).split(",")
+            for num in range(len(ids)):
+                binds['publication_state'] = [PUBLICATIONDB_STATUSES[states[num]]]
+                binds['id'] = [ids[num]]
+	        binds['fail_reason'] = [reasons[num]]
+	        binds['retry_value'] = [int(retry[num])]	
+                self.api.modify(self.transferDB.UpdatePublication_sql, **binds)
+	
         elif subresource == 'retryPublication':
             ###############################################
             # retryPublication API
@@ -209,10 +229,10 @@ class RESTFileTransfers(RESTEntity):
             ###############################################
             if 'time_to' not in kwargs:
                 raise InvalidParameter()
-            binds['time_to'] = kwargs['time_to']
-            binds['new_transfer_state'] = TRANSFERDB_STATUSES['NEW']
-            binds['transfer_state'] = TRANSFERDB_STATUSES['RETRY']
-            self.api.modify(self.transferDB.RetryTransfers_sql, **binds)
+            binds['time_to'] = [kwargs['time_to']]
+            binds['new_transfer_state'] = [TRANSFERDB_STATUSES['NEW']]
+            binds['transfer_state'] = [TRANSFERDB_STATUSES['RETRY']]
+            return self.api.modifynocheck(self.transferDB.RetryTransfers_sql, **binds)
 
         elif subresource == 'killTransfers':
             ###############################################
@@ -267,13 +287,10 @@ class RESTFileTransfers(RESTEntity):
             # ---------------------------------------------
             if not asoworker:
                 raise InvalidParameter("Required asoworker parameter is not set.")
-            if not username:
-                raise InvalidParameter("Required username parameter is not defined.")
             if not limit:
                 limit = 1000
             binds['limit'] = limit if limit < 1000 else 1000
             binds['asoworker'] = asoworker
-            binds['username'] = username
             sqlQuery = ""
             if subresource == 'acquiredTransfers':
                 if grouping > 3:
@@ -281,17 +298,17 @@ class RESTFileTransfers(RESTEntity):
                 binds['state'] = TRANSFERDB_STATUSES['ACQUIRED']
                 if grouping == 0:
                     # ---------------------------------------------
-                    # Return: Docs, which match these conditions: asoworker, state = ACQUIRED, username
+                    # Return: Docs, which match these conditions: asoworker, state = ACQUIRED
                     # ---------------------------------------------
                     sqlQuery = self.transferDB.GetDocsTransfer0_sql
                 elif grouping == 1:
                     # ---------------------------------------------
                     # (str) taskname: taskname
-                    # Return: Docs, which match these conditions: asoworker, state = ACQUIRED, username, taskname
+                    # Return: Docs, which match these conditions: asoworker, state = ACQUIRED, username
                     # ---------------------------------------------
-                    if not taskname:
+                    if not username:
                         raise InvalidParameter('Taskname is not defined')
-                    binds['taskname'] = taskname
+                    binds['username'] = username
                     sqlQuery = self.transferDB.GetDocsTransfer1_sql
                 elif grouping == 2:
                     # ---------------------------------------------
@@ -328,9 +345,9 @@ class RESTFileTransfers(RESTEntity):
                     # (str) taskname: taskname
                     # Return: Docs, which match these conditions: asoworker, state = ACQUIRED, username, taskname
                     # ---------------------------------------------
-                    if not taskname:
-                        raise InvalidParameter('Taskname is not defined')
-                    binds['taskname'] = taskname
+                    if not username:
+                        raise InvalidParameter('Username is not defined')
+                    binds['username'] = username
                     sqlQuery = self.transferDB.GetDocsPublication1_sql
                 rows = self.api.query(None, None, sqlQuery, **binds)
                 return rows
