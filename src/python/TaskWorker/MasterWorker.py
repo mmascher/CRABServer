@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/tenv python
 #external dependencies
 from __future__ import print_function
 import os
@@ -258,7 +258,6 @@ class MasterWorker(object):
                 else:
                     #The task stays in HOLDING and will be acquired again later
                     self.logger.info("Skipping %s since it could not be updated to QUEUED. Will be retried in the next iteration", task['tm_taskname'])
-
 
             self.slaves.injectWorks(toInject)
 

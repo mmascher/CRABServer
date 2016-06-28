@@ -162,6 +162,8 @@ $(document).ready(function() {
                 $("#task-pset-paragraph").text(data);
             });
 
+        var urlEnd = "/sandbox.tar.gz";
+
         $("#task-config-link").attr("href", userWebDir + "/debug/crabConfig.py");
         $("#task-pset-link").attr("href", userWebDir + "/debug/originalPSet.py");
     }
