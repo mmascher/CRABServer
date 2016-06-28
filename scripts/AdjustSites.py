@@ -194,6 +194,10 @@ def makeWebDir(ad):
         os.makedirs(path)
         ## Copy the sandbox to the web directory.
         shutil.copy2(os.path.join(".", "sandbox.tar.gz"), os.path.join(path, "sandbox.tar.gz"))
+        ## Copy the debug folder. It might not be available if an older (<3.3.1607) crabclient is used.
+        if os.path.isfile(os.path.join(".", "debug_files.tar.gz")):
+            shutil.copy2(os.path.join(".", "debug_files.tar.gz"), os.path.join(path, "debug_files.tar.gz"))
+
         ## Make all the necessary symbolic links in the web directory.
         sourceLinks = ["debug",
                        "RunJobs.dag", "RunJobs.dag.dagman.out", "RunJobs.dag.nodes.log",
@@ -209,6 +213,7 @@ def makeWebDir(ad):
         os.symlink(os.path.abspath(os.path.join(".", "node_state")), os.path.join(path, "node_state.txt"))
         os.symlink(os.path.abspath(os.path.join(".", "site.ad")), os.path.join(path, "site_ad.txt"))
         os.symlink(os.path.abspath(os.path.join(".", ".job.ad")), os.path.join(path, "job_ad.txt"))
+        os.symlink(os.path.abspath(os.path.join(".", "task_process/status_cache.txt")), os.path.join(path, "status_cache"))
     except Exception as ex:
         printLog("Failed to copy/symlink files in the user web directory: %s" % str(ex))
 

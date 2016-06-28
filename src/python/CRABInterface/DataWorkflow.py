@@ -1,12 +1,14 @@
 import copy
+import time
 import logging
-import cherrypy
 from ast import literal_eval
 
 ## WMCore dependecies
-from WMCore.REST.Error import ExecutionError, InvalidParameter
+from WMCore.REST.Error import ExecutionError
 
 ## CRAB dependencies
+from ServerUtilities import TASKLIFETIME
+from ServerUtilities import NUM_DAYS_FOR_RESUBMITDRAIN
 from CRABInterface.Utils import CMSSitesCache, conn_handler, getDBinstance
 
 
@@ -46,11 +48,6 @@ class DataWorkflow(object):
            before it is committed to the DB.
            """
         return workflow
-
-    @classmethod
-    def chooseScheduler(cls, scheddname=None, backend_urls=None):
-        """ Has to be subclassed """
-        raise NotImplementedError
 
     def getLatests(self, username, timestamp):
         """Retrives the latest workflows for the user
@@ -105,7 +102,8 @@ class DataWorkflow(object):
                username, userdn, savelogsflag, publication, publishname, publishname2, asyncdest, dbsurl, publishdbsurl, vorole, vogroup, tfileoutfiles, edmoutfiles,
                runs, lumis, totalunits, adduserfiles, oneEventMode=False, maxjobruntime=None, numcores=None, maxmemory=None, priority=None, lfn=None,
                ignorelocality=None, saveoutput=None, faillimit=10, userfiles=None, userproxy=None, asourl=None, asodb=None, scriptexe=None, scriptargs=None,
-               scheddname=None, extrajdl=None, collector=None, dryrun=False, publishgroupname=False, nonvaliddata=False, inputdata=None, primarydataset=None):
+               scheddname=None, extrajdl=None, collector=None, dryrun=False, publishgroupname=False, nonvaliddata=False, inputdata=None, primarydataset=None,
+               debugfilename=None):
         """Perform the workflow injection
 
            :arg str workflow: workflow name requested by the user;
@@ -165,13 +163,6 @@ class DataWorkflow(object):
         else:
             collector = backend_urls['htcondorPool']
 
-        schedd_name = ""
-        try:
-            schedd_name = self.chooseScheduler(scheddname, backend_urls).split(":")[0]
-        except IOError as err:
-            self.logger.debug("Failed to communicate with components %s. Request name %s: " % (str(err), str(workflow)))
-            raise ExecutionError("Failed to communicate with crabserver components. If problem persist, please report it.")
-
         splitArgName = self.splitArgMap[splitalgo]
         dbSerializer = str
 
@@ -212,6 +203,7 @@ class DataWorkflow(object):
                                                 splitArgName : algoargs, 'runs': runs, 'lumis': lumis})],
                             total_units     = [totalunits],
                             user_sandbox    = [cachefilename],
+                            debug_files     = [debugfilename],
                             cache_url       = [cacheurl],
                             username        = [username],
                             user_dn         = [userdn],
@@ -242,7 +234,7 @@ class DataWorkflow(object):
                             asourl          = [asourl],
                             asodb           = [asodb],
                             collector       = [collector],
-                            schedd_name     = [schedd_name],
+                            schedd_name     = [scheddname],
                             dry_run         = ['T' if dryrun else 'F'],
                             user_files       = [dbSerializer(userfiles)],
                             transfer_outputs = ['T' if saveoutput else 'F'],
@@ -253,6 +245,25 @@ class DataWorkflow(object):
         )
 
         return [{'RequestName': workflow}]
+
+
+    def checkTaskLifetime(self, submissionTime):
+        """ Verify that at least 7 days are left before the task periodic remove expression
+            evaluates to true. This is to let job finish and possibly not remove a task with
+            running jobs.
+
+            submissionTime are the seconds since epoch of the task submission time in the DB
+        """
+
+        msg = "ok"
+        ## resubmitLifeTime is 23 days expressed in seconds
+        resubmitLifeTime = TASKLIFETIME - NUM_DAYS_FOR_RESUBMITDRAIN * 24 * 60 * 60
+        if time.time() > (submissionTime + resubmitLifeTime):
+            msg = "Resubmission of the task is not possble since less than %s days are left before the task is removed from the schedulers.\n" % NUM_DAYS_FOR_RESUBMITDRAIN
+            msg += "A task expires %s days after its submission\n" % (TASKLIFETIME / (24 * 60 * 60))
+            msg += "You can submit a 'recovery task' if you need to execute again the failed jobs\n"
+            msg += "See https://twiki.cern.ch/twiki/bin/view/CMSPublic/CRAB3FAQ for more information about recovery tasks"
+        return msg
 
 
     def resubmit(self, workflow, publication, jobids, force, siteblacklist, sitewhitelist, maxjobruntime, maxmemory, numcores, priority, userdn, userproxy):
@@ -271,12 +282,18 @@ class DataWorkflow(object):
         ## Get the status of the task/jobs.
         statusRes = self.status(workflow, userdn, userproxy)[0]
 
+        ## Check lifetime of the task and raise ExecutionError if appropriate
+        self.logger.info("Checking if resubmission is possible: we don't allow resubmission %s days before task expiration date", NUM_DAYS_FOR_RESUBMITDRAIN)
+        retmsg = self.checkTaskLifetime(statusRes['submissionTime'])
+        if retmsg != "ok":
+            return [{'result': retmsg}]
+
         ## Ignore the following options if this is a publication resubmission or if the
         ## task was never submitted.
         if publication or statusRes['status'] == 'SUBMITFAILED':
             jobids, force = None, False
             siteblacklist, sitewhitelist, maxjobruntime, maxmemory, numcores, priority = None, None, None, None, None, None
-            
+
         ## We allow resubmission only if the task status is one of these:
         allowedTaskStates = ['SUBMITTED', 'KILLED', 'KILLFAILED', 'RESUBMITFAILED', 'FAILED']
         ## We allow resubmission of successfully finished jobs if the user explicitly
@@ -441,7 +458,8 @@ class DataWorkflow(object):
             #Set arguments first so in case of failure we don't do any "damage"
             self.api.modify(self.Task.SetArgumentsTask_sql, taskname = [workflow], arguments = [dbSerializer(args)])
             self.api.modify(self.Task.SetStatusWarningTask_sql, status = ["NEW"], command = ["KILL"], taskname = [workflow], warnings = [str(warnings)])
-        elif statusRes['status'] == 'NEW':
+        elif statusRes['status'] == 'NEW' and statusRes['command'] == 'SUBMIT':
+            #if the task has just been submitted and not acquired by the TW
             self.api.modify(self.Task.SetStatusWarningTask_sql, status = ["KILLED"], command = ["KILL"], taskname = [workflow], warnings = [str(warnings)])
         else:
             raise ExecutionError("You cannot kill a task if it is in the %s state" % statusRes['status'])

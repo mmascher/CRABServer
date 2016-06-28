@@ -5,6 +5,7 @@ import copy
 import tarfile
 import StringIO
 import tempfile
+import calendar
 from ast import literal_eval
 
 import pycurl
@@ -35,15 +36,6 @@ class MissingNodeStatus(ExecutionError):
 class HTCondorDataWorkflow(DataWorkflow):
     """ HTCondor implementation of the status command.
     """
-
-    @classmethod
-    @conn_handler(services=['centralconfig'])
-    def chooseScheduler(cls, scheddname=None, backend_urls=None):
-        if not scheddname:
-            locator = HTCondorLocator.HTCondorLocator(backend_urls)
-            scheddname = locator.getSchedd()
-        return scheddname
-
 
     def getRootTasks(self, workflow, schedd):
         rootConst = 'TaskType =?= "ROOT" && CRAB_ReqName =?= %s && (isUndefined(CRAB_Attempt) || CRAB_Attempt == 0)' % HTCondorUtils.quote(workflow)
@@ -329,43 +321,6 @@ class HTCondorDataWorkflow(DataWorkflow):
                     for outputFileDetails in outputDatasetDetails.values():
                         res['outputDatasets'][outputDataset]['numEvents'] += outputFileDetails['NumberOfEvents']
 
-        ## Old logic kept here only for backward compatibility. Remove it in March 2016 release.
-        res['dbsInLumilist'] = {}
-        res['dbsInLumilistNewClientOldTask'] = {}
-        res['dbsOutLumilist'] = {}
-        res['dbsNumEvents'] = 0
-        res['dbsNumFiles'] = 0
-        if inputDataset:
-            try:
-                #load the input dataset's lumilist
-                dbs = DBSReader(dbsUrl)
-                inputDetails = dbs.listDatasetFileDetails(inputDataset)
-                res['dbsInLumilist'] = _compactLumis(inputDetails)
-                res['dbsInLumilistNewClientOldTask'] = LumiList(runsAndLumis=_compactLumis(inputDetails)).getCompactList()
-                self.logger.info("Aggregated input lumilist: %s" % res['dbsInLumilist'])
-            except Exception as ex:
-                msg = "Failed to contact DBS: %s" % str(ex)
-                self.logger.exception(msg)
-                raise ExecutionError("Exception while contacting DBS. Cannot get the input lumi lists.")
-        if outputDatasets and publication:
-            try:
-                #load the output datasets' lumilist
-                dbs = DBSReader("https://cmsweb.cern.ch/dbs/prod/phys03/DBSReader") #We can only publish here with DBS3
-                outLumis = []
-                for outputDataset in outputDatasets:
-                    outputDetails = dbs.listDatasetFileDetails(outputDataset)
-                    outLumis.append(_compactLumis(outputDetails))
-                    res['dbsNumEvents'] += sum(x['NumberOfEvents'] for x in outputDetails.values())
-                    res['dbsNumFiles'] += sum(len(x['Parents']) for x in outputDetails.values())
-                outLumis = LumiList(runsAndLumis = outLumis).compactList
-                for run, lumis in outLumis.iteritems():
-                    res['dbsOutLumilist'][run] = reduce(lambda x1, x2: x1+x2, map(lambda x: range(x[0], x[1]+1), lumis))
-                self.logger.info("Aggregated output lumilist: %s" % res['dbsOutLumilist'])
-            except Exception as ex:
-                msg = "Failed to contact DBS: %s" % str(ex)
-                self.logger.exception(msg)
-                raise ExecutionError("Exception while contacting DBS. Cannot get the output lumi lists.")
-
         yield res
 
 
@@ -382,6 +337,7 @@ class HTCondorDataWorkflow(DataWorkflow):
                   "command"           : '', #from the db
                   "taskFailureMsg"   : '', #from the db
                   "taskWarningMsg"   : [], #from the db
+                  "submissionTime"   : 0, #from the db
                   "statusFailureMsg" : '', #errors of the status itself
                   "jobsPerStatus"    : {},
                   "failedJobdefs"    : 0,
@@ -389,7 +345,8 @@ class HTCondorDataWorkflow(DataWorkflow):
                   "jobdefErrors"     : [],
                   "jobList"          : [],
                   "schedd"           : '', #from the db
-                  "collector"        : '' } #from the db
+                  "collector"        : '',  #from the db
+                  "username"         : ''} #from the db
 
         # First, verify the task has been submitted by the backend.
         self.logger.info("Got status request for workflow %s" % workflow)
@@ -400,9 +357,13 @@ class HTCondorDataWorkflow(DataWorkflow):
         except StopIteration:
             raise ExecutionError("Impossible to find task %s in the database." % workflow)
 
+        result['submissionTime'] = calendar.timegm(row.start_time.utctimetuple())
         if row.task_command:
             result['command'] = row.task_command
 
+        ## Add scheduler and collector to the result dictionary.
+        if row.username:
+            result['username'] = row.username
         if row.schedd:
             result['schedd'] = row.schedd
         if row.collector:
@@ -530,6 +491,7 @@ class HTCondorDataWorkflow(DataWorkflow):
                 self.logger.info("Web status for workflow %s done " % workflow)
             except Exception as exp: # Empty results is catched here, because getRootTasks raises InvalidParameter exception.
                 #when the task is submitted for the first time
+                self.logger.exception("Exception while querying schedd")
                 if row.task_status in ['QUEUED']:
                     result['status'] = row.task_status
                 else:

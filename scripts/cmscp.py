@@ -436,7 +436,7 @@ def perform_stageout(local_stageout_mgr, direct_stageout_impl, \
         retval, retmsg = perform_direct_stageout(direct_stageout_impl, \
                                                  direct_stageout_command, \
                                                  direct_stageout_protocol, \
-                                                 source_file, dest_pfn, dest_site, \
+                                                 source_file, dest_pfn, dest_site, source_site, \
                                                  is_log)
     else:
         msg = "ERROR: Skipping unknown stageout policy named '%s'." % (policy)
@@ -508,6 +508,8 @@ def perform_local_stageout(local_stageout_mgr, \
                                   'inject'             : True
                                  }
             G_ASO_TRANSFER_REQUESTS.append(file_transfer_info)
+    if stageout_info['StageOutReport']:
+        DashboardAPI.reportFailureToDashboard(retval, G_JOB_AD, stageout_info['StageOutReport'])
     return retval, retmsg
 
 ## = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
@@ -707,7 +709,7 @@ def setASOStartTime():
 
 def perform_direct_stageout(direct_stageout_impl, \
                             direct_stageout_command, direct_stageout_protocol, \
-                            source_file, dest_pfn, dest_site, \
+                            source_file, dest_pfn, dest_site, source_site, \
                             is_log):
     """
     Wrapper for direct stageouts.
@@ -720,6 +722,12 @@ def perform_direct_stageout(direct_stageout_impl, \
                             'is_log'    : is_log,
                             'removed'   : False
                            }
+    stageoutDashboardReport = {'LFN': dest_pfn,
+                               'PNN': dest_site,
+                               'PSN': source_site,
+                               'StageOutCommand': direct_stageout_command,
+                               'StageOutType': 'DIRECT',
+                              }
     G_DIRECT_STAGEOUTS.append(direct_stageout_info)
     retval, retmsg = 0, None
     try:
@@ -748,6 +756,8 @@ def perform_direct_stageout(direct_stageout_impl, \
             except AttributeError as ex:
                 msg += "\nTraceback unavailable\n"
             ## StageOutError.StageOutFailure has error code 60311.
+            stageoutDashboardReport['StageOutExit'] = 60311
+            DashboardAPI.reportFailureToDashboard(60311, G_JOB_AD, [stageoutDashboardReport])
             raise StageOutError.StageOutFailure(msg, Command = direct_stageout_command, Protocol = direct_stageout_protocol, \
                                                 LFN = dest_pfn, InputPFN = source_file, TargetPFN = dest_pfn)
         finally:
@@ -766,7 +776,8 @@ def perform_direct_stageout(direct_stageout_impl, \
         if not sites_added_ok:
             msg = "WARNING: Ignoring failure in adding the above information to the job report."
             print(msg)
-
+    stageoutDashboardReport['StageOutExit'] = retval
+    DashboardAPI.reportFailureToDashboard(retval, G_JOB_AD, [stageoutDashboardReport])
     return retval, retmsg
 
 ## = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =

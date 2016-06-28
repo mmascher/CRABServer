@@ -15,10 +15,11 @@ from WMCore.Configuration import loadConfigurationFile
 #CAFUtilities dependencies
 from RESTInteractions import HTTPRequests
 
-from TaskWorker.WorkerExceptions import ConfigException
+import HTCondorLocator
 from TaskWorker.TestWorker import TestWorker
 from MultiProcessingLog import MultiProcessingLog
 from TaskWorker.Worker import Worker, setProcessLogger
+from TaskWorker.WorkerExceptions import ConfigException
 from TaskWorker.Actions.Recurring.BaseRecurringAction import handleRecurring
 from TaskWorker.Actions.Handler import handleResubmit, handleNewTask, handleKill
 
@@ -41,6 +42,8 @@ def validateConfig(config):
     :return bool, string: flag for validation result and a message."""
     if getattr(config, 'TaskWorker', None) is None:
         return False, "Configuration problem: Task worker section is missing. "
+    if not hasattr(config.TaskWorker, 'scheddPickerFunction'):
+        config.TaskWorker.scheddPickerFunction = HTCondorLocator.memoryBasedChoices
     return True, 'Ok'
 
 
@@ -89,7 +92,7 @@ class MasterWorker(object):
             else:
                 logHandler = MultiProcessingLog('logs/twlog.txt', when='midnight')
                 logFormatter = \
-                    logging.Formatter("%(asctime)s:%(levelname)s:%(module)s:%(message)s")
+                    logging.Formatter("%(asctime)s:%(levelname)s:%(module)s,%(lineno)d:%(message)s")
                 logHandler.setFormatter(logFormatter)
                 logging.getLogger().addHandler(logHandler)
             loglevel = logging.INFO
@@ -102,6 +105,7 @@ class MasterWorker(object):
             logger.debug("PID %s.", os.getpid())
             logger.debug("Logging level initialized to %s.", loglevel)
             return logger
+
 
         self.STOP = False
         self.TEST = test
@@ -261,7 +265,7 @@ class MasterWorker(object):
                 if action.isTimeToGo():
                     #Maybe we should use new slaves and not reuse the ones used for the tasks
                     self.logger.debug("Injecting recurring action: \n%s", (str(action.__module__)))
-                    self.slaves.injectWorks([(handleRecurring, {'tm_taskname' : action.__module__}, 'FAILED', action.__module__)])
+                    self.slaves.injectWorks([(handleRecurring, {'tm_username': 'recurring', 'tm_taskname' : action.__module__}, 'FAILED', action.__module__)])
 
             self.logger.info('Master Worker status:')
             self.logger.info(' - free slaves: %d', self.slaves.freeSlaves())
@@ -308,8 +312,18 @@ if __name__ == '__main__':
     if not status_:
         raise ConfigException(msg_)
 
-    mw = MasterWorker(configuration, quiet=options.quiet, debug=options.debug)
-    signal.signal(signal.SIGINT, mw.quit_)
-    signal.signal(signal.SIGTERM, mw.quit_)
-    mw.algorithm()
-    mw.slaves.end()
+    mw = None
+    try:
+        mw = MasterWorker(configuration, quiet=options.quiet, debug=options.debug)
+        signal.signal(signal.SIGINT, mw.quit_)
+        signal.signal(signal.SIGTERM, mw.quit_)
+        mw.algorithm()
+    except:
+        if mw:
+            mw.logger.exception("Unexpected and fatal error. Exiting task worker")
+        #don't really wanna miss this, propagating the exception and exiting really bad
+        raise
+    finally:
+        #there can be an exception before slaves are created, e.g. in the __init__
+        if hasattr(mw, 'slaves'):
+            mw.slaves.end()

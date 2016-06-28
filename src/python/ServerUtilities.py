@@ -10,6 +10,7 @@ import re
 import time
 import urllib
 import hashlib
+import calendar
 import datetime
 import traceback
 import subprocess
@@ -25,6 +26,14 @@ FEEDBACKMAIL = 'hn-cms-computing-tools@cern.ch'
 MAX_WALLTIME = 21*60*60 + 30*60
 MAX_MEMORY = 2*1024
 MAX_DISK_SPACE = 20000000 # Disk usage is not used from .job.ad as CRAB3 is not seeting it. 20GB is max.
+
+## Parameter used to set the LeaveJobInQueue and the PeriodicRemoveclassads.
+## It's also used during resubmissions since we don't allow a resubmission during the last week
+## Before changing this value keep in mind that old running DAGs have the old value in the CRAB_TaskSubmitTime
+## classad expression but DagmanResubmitter uses this value to calculate if a resubmission is possible
+TASKLIFETIME = 30*24*60*60
+## Number of days where the resubmission is not possible if the task is expiring
+NUM_DAYS_FOR_RESUBMITDRAIN = 7
 
 ## These are all possible statuses of a task in the TaskDB.
 TASKDBSTATUSES_TMP = ['NEW', 'HOLDING', 'QUEUED']
@@ -81,6 +90,18 @@ def USER_SANDBOX_EXCLUSIONS(tarmembers):
         return ['PSet.py', 'PSet.pkl', 'debug/crabConfig.py', 'debug/originalPSet.py.py']
     else:
         return ['debug/crabConfig.py', 'debug/originalPSet.py.py']
+    
+def NEW_USER_SANDBOX_EXCLUSIONS(tarmembers):
+    """ Exclusion function used with the new crabclient (>= 3.3.1607). Since the new client sandbox no longer
+        contains the debug files, it's pointless to exclude them. Also, this function is used when getting
+        the hash of the debug tarball (a new addition in 3.3.1607). If the debug files are excluded, the tarball
+        would always have the same hash and stay the same, serving no purpose.
+    """
+    if BOOTSTRAP_CFGFILE_DUMP in map(lambda x: x.name, tarmembers):
+        #exclude the pickle pset if the dumpPython PSet is there
+        return ['PSet.py', 'PSet.pkl']
+    else:
+        return []
 
 
 def isCouchDBURL(url):
@@ -287,6 +308,7 @@ def mostCommon(lst, default=0):
         return default
 
 
+<<<<<<< HEAD
 def getHashLfn(lfn):
     """
     Provide a hashed lfn from an lfn.
@@ -342,3 +364,20 @@ def oracleOutputMapping(result, key=None):
         else:
             outputDict.append(docOut)
     return outputDict
+
+
+def getTimeFromTaskname(taskname):
+    """ Get the submission time from the taskname and return the seconds since epoch
+        corresponding to it. The function is not currently used.
+    """
+
+    #validate taskname. In principle not necessary, but..
+    if not isinstance(taskname, str):
+        raise TypeError('In ServerUtilities.getTimeFromTaskname: "taskname" parameter must be a string')
+    stime = taskname.split(':')[0] #s stands for string
+    stimePattern = '^\d{6}_\d{6}$'
+    if not re.match(stimePattern, stime):
+        raise ValueError('In ServerUtilities.getTimeFromTaskname: "taskname" parameter must match %s' % stimePattern)
+    #convert the time
+    dtime = time.strptime(stime, '%y%m%d_%H%M%S') #d stands for data structured
+    return calendar.timegm(dtime)

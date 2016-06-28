@@ -7,6 +7,7 @@ import traceback
 import multiprocessing
 from Queue import Empty
 from base64 import b64encode
+from logging import FileHandler
 from httplib import HTTPException
 from logging.handlers import TimedRotatingFileHandler
 
@@ -30,21 +31,39 @@ def truncateError(msg):
     else:
         return msg
 
-def processWorker(inputs, results, resthost, resturi, procnum):
-    """Wait for an reference to appear in the input queue, call the referenced object
-       and write the output in the output queue.
 
-       :arg Queue inputs: the queue where the inputs are shared by the master
-       :arg Queue results: the queue where this method writes the output
-       :return: default returning zero, but not really needed."""
-    logger = setProcessLogger(str(procnum))
-    logger.info("Process %s is starting. PID %s", procnum, os.getpid())
+def addTaskLogHandler(logger, username, taskname):
+    #set the logger to save the tasklog
+    formatter = logging.Formatter("%(asctime)s:%(levelname)s:%(module)s:%(message)s")
+    taskdirname = "logs/tasks/%s/" % username
+    try:
+        os.mkdir(taskdirname)
+    except OSError as ose:
+        if ose.errno != 17: #ignore the "Directory already exists error" but print other errors traces
+            logger.exception("Cannot set task handler logfile for task %s. Ignoring and continuing normally." % taskname)
+    taskhandler = FileHandler(taskdirname + taskname + '.log')
+    taskhandler.setFormatter(formatter)
+    taskhandler.setLevel(logging.DEBUG)
+    logger.addHandler(taskhandler)
+
+
+    return taskhandler
+
+
+def removeTaskLogHandler(logger, taskhandler):
+    taskhandler.flush()
+    taskhandler.close()
+    logger.removeHandler(taskhandler)
+
+
+def processWorkerLoop(inputs, results, resthost, resturi, procnum, logger):
     procName = "Process-%s" % procnum
     while True:
         try:
             ## Get (and remove) an item from the input queue. If the queue is empty, wait
             ## until an item is available.
             workid, work, task, failstatus, inputargs = inputs.get()
+            taskhandler = addTaskLogHandler(logger, task['tm_username'], task['tm_taskname'])
         except (EOFError, IOError):
             crashMessage = "Hit EOF/IO in getting new work\n"
             crashMessage += "Assuming this is a graceful break attempt.\n"
@@ -90,11 +109,28 @@ def processWorker(inputs, results, resthost, resturi, procnum):
                     logger.exception('Traceback follows:')
         t1 = time.time()
         logger.debug("%s: ...work on %s completed in %d seconds: %s", procName, task['tm_taskname'], t1-t0, outputs)
+        removeTaskLogHandler(logger, taskhandler)
 
         results.put({
                      'workid': workid,
                      'out' : outputs
                     })
+
+
+def processWorker(inputs, results, resthost, resturi, procnum):
+    """Wait for an reference to appear in the input queue, call the referenced object
+       and write the output in the output queue.
+
+       :arg Queue inputs: the queue where the inputs are shared by the master
+       :arg Queue results: the queue where this method writes the output
+       :return: default returning zero, but not really needed."""
+    logger = setProcessLogger(str(procnum))
+    logger.info("Process %s is starting. PID %s", procnum, os.getpid())
+    try:
+        processWorkerLoop(inputs, results, resthost, resturi, procnum, logger)
+    except: #pylint: disable=bare-except
+        #if enything happen put the log inside process logfiles instead of nohup.log
+        logger.exception("Unexpected error in process worker!")
     logger.debug("Slave %s exiting.", procnum)
     return 0
 
@@ -104,7 +140,7 @@ def setProcessLogger(name):
         can be retrieved with logging.getLogger(name) in other parts of the code
     """
     logger = logging.getLogger(name)
-    handler = TimedRotatingFileHandler('logs/processes/proc.%s.txt' % name, 'midnight', backupCount=30)
+    handler = TimedRotatingFileHandler('logs/processes/proc.c3id_%s.pid_%s.txt' % (name, os.getpid()), 'midnight', backupCount=30)
     formatter = logging.Formatter("%(asctime)s:%(levelname)s:%(module)s:%(message)s")
     handler.setFormatter(formatter)
     logger.addHandler(handler)
