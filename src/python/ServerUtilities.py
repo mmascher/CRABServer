@@ -308,7 +308,6 @@ def mostCommon(lst, default=0):
         return default
 
 
-<<<<<<< HEAD
 def getHashLfn(lfn):
     """
     Provide a hashed lfn from an lfn.

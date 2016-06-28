@@ -157,6 +157,8 @@ class RESTFileTransfers(RESTEntity):
                 for num in range(len(ids)):
                     binds['id'] = [ids[num]]
                     binds['transfer_state'] = [TRANSFERDB_STATUSES[states[num]]]
+                    binds['fts_instance'] = [None]
+                    binds['fts_id'] = [None]
                     binds['fail_reason'] = [reasons[num]]
                     binds['retry_value'] = [int(retry[num])]
                     self.api.modifynocheck(self.transferDB.UpdateTransfers_sql, **binds)
