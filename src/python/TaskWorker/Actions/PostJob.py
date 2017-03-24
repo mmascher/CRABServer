@@ -87,6 +87,7 @@ from httplib import HTTPException
 import DashboardAPI
 import WMCore.Database.CMSCouch as CMSCouch
 from WMCore.DataStructs.LumiList import LumiList
+from WMCore.Services.WMArchive.DataMap import createArchiverDoc
 
 from ast import literal_eval
 from TaskWorker import __version__
@@ -106,6 +107,9 @@ from WMCore.Configuration import Configuration, ConfigSection
 ASO_JOB = None
 G_JOB_REPORT_NAME = None
 G_JOB_REPORT_NAME_NEW = None
+G_WMARCHIVE_REPORT_NAME = None
+G_WMARCHIVE_REPORT_NAME_NEW = None
+G_WMARCHIVE_DEST_LOCATION = "/tmp"
 G_ERROR_SUMMARY_FILE_NAME = "error_summary.json"
 G_FJR_PARSE_RESULTS_FILE_NAME= "task_process/fjr_parse_results.txt"
 
@@ -1478,7 +1482,11 @@ class PostJob():
         global G_JOB_REPORT_NAME
         G_JOB_REPORT_NAME = "jobReport.json.%s" % (self.job_id)
         global G_JOB_REPORT_NAME_NEW
-        G_JOB_REPORT_NAME_NEW = "job_fjr.%s.%d.json" % (self.job_id, self.crab_retry)
+        G_JOB_REPORT_NAME_NEW = "job_fjr.%s.%s.json" % (self.job_id, self.crab_retry)
+        global G_WMARCHIVE_REPORT_NAME
+        G_WMARCHIVE_REPORT_NAME = "WMArchiveReport.json.%s" % (self.job_id)
+        global G_WMARCHIVE_REPORT_NAME_NEW
+        G_WMARCHIVE_REPORT_NAME_NEW = "WMArchiveReport.%s.%s.json" % (self.job_id, self.crab_retry)
 
         if first_pj_execution():
             self.handle_webdir()
@@ -1550,6 +1558,16 @@ class PostJob():
             msg = "Unknown error while preparing the error report."
             self.logger.exception(msg)
         self.logger.info("====== Finished to prepare error report.")
+
+        ## Prepare the WMArchive report and put it in the direcotry to be processes
+        self.logger.info("====== Starting to prepare WMArchive report.")
+        try:
+            self.processWMArchive(retval) 
+        except:
+            msg = "Unknown error while preparing the WMArchive report."
+            self.logger.exception(msg)
+        self.logger.info("====== Finished to prepare WMArchive report.")
+            
 
         ## Decide if the whole task should be aborted (in case a significant fraction of
         ## the jobs has failed).
@@ -2735,6 +2753,24 @@ class PostJob():
                     rval = 3
         finally:
             return rval
+
+    ## = = = = = PostJob = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
+
+    def processWMArchive(self, retval):
+        archiveDoc = {}
+        with open(G_WMARCHIVE_REPORT_NAME) as fd:
+            job = {}
+            job['id'] = '%s-%s' % (self.job_id, self.crab_retry)
+            job['doc'] = {}
+            job['doc']["fwjr"] = json.load(fd)
+            job['doc']["jobtype"] = 'CRAB3'
+            job['doc']["jobstate"] = 'success' if retval == 0 else 'failed'
+            job['doc']["timestamp"] = int(time.time())
+            archiveDoc = createArchiverDoc(job)
+        with open(G_WMARCHIVE_REPORT_NAME_NEW, 'w') as fd:
+            json.dump(archiveDoc, fd)
+        #not using shutil.move because I want to move the file in the same disk
+        os.rename(G_WMARCHIVE_REPORT_NAME_NEW, os.path.join(G_WMARCHIVE_DEST_LOCATION, G_WMARCHIVE_REPORT_NAME_NEW))
 
 ##==============================================================================
 

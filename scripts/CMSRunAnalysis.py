@@ -393,6 +393,7 @@ def handleException(exitAcronym, exitCode, exitMsg):
 
     with open('jobReport.json', 'w') as of:
         json.dump(report, of)
+    #TODO Empty WMArchive report
     if ad and not "CRAB3_RUNTIME_DEBUG" in os.environ:
         stopDashboardMonitoring(ad)
 
@@ -923,6 +924,9 @@ if __name__ == "__main__":
                 except:
                     jobExitCode = WMex.code
                 report = report.__to_json__(None)
+                #save the virgin WMArchive report
+                with open('WMArchiveReport.json', 'w') as of:
+                    json.dump(report, of)
                 StripReport(report)
                 report['jobExitCode'] = jobExitCode
                 with open('jobReport.json', 'w') as of:
@@ -947,6 +951,8 @@ if __name__ == "__main__":
         report.parse('FrameworkJobReport.xml', "cmsRun")
         jobExitCode = report.getExitCode()
         report = report.__to_json__(None)
+        with open('WMArchiveReport.json', 'w') as of:
+            json.dump(report, of)
         StripReport(report)
         # Record the payload process's exit code separately; that way, we can distinguish
         # cmsRun failures from stageout failures.  The initial use case of this is to
