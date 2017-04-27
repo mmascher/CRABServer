@@ -109,7 +109,6 @@ G_JOB_REPORT_NAME = None
 G_JOB_REPORT_NAME_NEW = None
 G_WMARCHIVE_REPORT_NAME = None
 G_WMARCHIVE_REPORT_NAME_NEW = None
-G_WMARCHIVE_DEST_LOCATION = "/tmp/wmarchive"
 G_ERROR_SUMMARY_FILE_NAME = "error_summary.json"
 G_FJR_PARSE_RESULTS_FILE_NAME= "task_process/fjr_parse_results.txt"
 
@@ -2757,6 +2756,7 @@ class PostJob():
     ## = = = = = PostJob = = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
 
     def processWMArchive(self, retval):
+        WMARCHIVE_DEST_LOCATION = json.load(open("/etc/wmarchive.json")).get("PJ_DEST", "/data/wmarchive")
         archiveDoc = {}
         with open(G_WMARCHIVE_REPORT_NAME) as fd:
             job = {}
@@ -2770,10 +2770,10 @@ class PostJob():
             archiveDoc['task'] = self.reqname 
         with open(G_WMARCHIVE_REPORT_NAME_NEW, 'w') as fd:
             json.dump(archiveDoc, fd)
-        if not os.path.isdir(G_WMARCHIVE_DEST_LOCATION):
-            os.makedirs(G_WMARCHIVE_DEST_LOCATION)
+        if not os.path.isdir(WMARCHIVE_DEST_LOCATION):
+            os.makedirs(WMARCHIVE_DEST_LOCATION)
         #not using shutil.move because I want to move the file in the same disk
-        os.rename(G_WMARCHIVE_REPORT_NAME_NEW, os.path.join(G_WMARCHIVE_DEST_LOCATION, "%s_%s" % (self.reqname, G_WMARCHIVE_REPORT_NAME_NEW)))
+        os.rename(G_WMARCHIVE_REPORT_NAME_NEW, os.path.join(WMARCHIVE_DEST_LOCATION, "%s_%s" % (self.reqname, G_WMARCHIVE_REPORT_NAME_NEW)))
 
 ##==============================================================================
 
