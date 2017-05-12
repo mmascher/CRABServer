@@ -20,7 +20,7 @@ WMARCHIVE_URL = None
 LOGNAME = "wmarchiveprocess.log"
 NEW_FJR_DIR = 'new'
 PROCESSED_FJR_DIR = 'processed'
-BULK_SIZE = 2
+BULK_SIZE = 200
 #PROCESSING_FJR_DIR = 'processing'
 
 QUIT = False
@@ -39,17 +39,20 @@ def loadConf():
             "BASE_DIR" : "/data/srv/glidecondor/condor_local/spool/2904/0/cluster6052904.proc0.subproc0/wmarchive/",
             "WMARCHIVE_URL" : "https://vocms013.cern.ch/wmarchive"
             "UPLOAD_CERT" : "/data/srv/glidecondor/condor_local/spool/2904/0/cluster6052904.proc0.subproc0/602e17194771641967ee6db7e7b3ffe358a54c59",
-            "UPLOAD_KEY" : "/data/srv/glidecondor/condor_local/spool/2904/0/cluster6052904.proc0.subproc0/602e17194771641967ee6db7e7b3ffe358a54c59"
+            "UPLOAD_KEY" : "/data/srv/glidecondor/condor_local/spool/2904/0/cluster6052904.proc0.subproc0/602e17194771641967ee6db7e7b3ffe358a54c59",
+            "BULK_SIZE" : 20
         }
         BASE_DIR is the location where this script is going to chdir to. It will create a file named wmarchiveprocess.log for logging,
             and it will read reports from $BASE_DIR/new (This value is also read by the postjob which will save files there)
         WMARCHIVE_URL is the url used as a target to upload documents in WMArchive
         UPLOAD_CERT and UPLOAD_KEY are the certificates used to talk to cmsweb
+        BULK_SIZE how many documents we upload every loop
     """
     global BASE_DIR
     global WMARCHIVE_URL
     global UPLOAD_KEY
     global UPLOAD_CERT
+    global BULK_SIZE
 
     logger = logging.getLogger()
     try:
@@ -63,6 +66,7 @@ def loadConf():
     WMARCHIVE_URL = str(conf["WMARCHIVE_URL"])
     UPLOAD_KEY = str(conf["UPLOAD_KEY"])
     UPLOAD_CERT = str(conf["UPLOAD_CERT"])
+    BULK_SIZE = int(conf["BULK_SIZE"])
 
 
 def logSetup():
@@ -111,25 +115,25 @@ def main():
         currentReps = sorted(reports[:BULK_SIZE])
         logger.debug("Current reports are %s" % currentReps)
         docs = []
-        for rep in currentReps:
-            repFullname = os.path.join(BASE_DIR, NEW_FJR_DIR, rep)
-            with open(repFullname) as fd:
-                docs.append(json.load(fd))
 
-        response = wmarchiver.archiveData(docs)
-
-        # Partial success is not allowed either all the insert is successful or none is
-        if response[0]['status'] == "ok" and len(response[0]['ids']) == len(docs):
-            logger.info("Successfully uploaded %d docs", len(docs))
-            import pdb
-            pdb.set_trace()
+        if docs:
             for rep in currentReps:
                 repFullname = os.path.join(BASE_DIR, NEW_FJR_DIR, rep)
-                repDestName = os.path.join(BASE_DIR, PROCESSED_FJR_DIR, rep)
-                os.rename(repFullname, repDestName)
-        else:
-            logger.warning("Upload failed and it will be retried in the next cycle: %s: %s.",
-                            response[0]['status'], response[0]['reason'])
+                with open(repFullname) as fd:
+                    docs.append(json.load(fd))
+
+            response = wmarchiver.archiveData(docs)
+
+            # Partial success is not allowed either all the insert is successful or none is
+            if response[0]['status'] == "ok" and len(response[0]['ids']) == len(docs):
+                logger.info("Successfully uploaded %d docs", len(docs))
+                for rep in currentReps:
+                    repFullname = os.path.join(BASE_DIR, NEW_FJR_DIR, rep)
+                    repDestName = os.path.join(BASE_DIR, PROCESSED_FJR_DIR, rep)
+                    os.rename(repFullname, repDestName)
+            else:
+                logger.warning("Upload failed and it will be retried in the next cycle: %s: %s.",
+                                response[0]['status'], response[0]['reason'])
 
         time.sleep(60)
 
@@ -139,7 +143,7 @@ if __name__ == '__main__':
     try:
         main()
     except QuietExit:
-        #Don't do anything since this has been handled by the inned function
+        #Don't do anything since this has been handled by the inner function
         pass
     except:
         # Hopefully this will never happen, but we need to foresee this case and log it properly
