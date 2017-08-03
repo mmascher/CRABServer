@@ -1,28 +1,31 @@
+""" Add me
+"""
 # WMCore dependecies here
 from WMCore.REST.Server import RESTEntity, restcall
 from WMCore.REST.Validation import validate_str, validate_num, validate_strlist
 from WMCore.REST.Error import InvalidParameter, UnsupportedMethod
 
 from CRABInterface.Utils import getDBinstance
-from CRABInterface.RESTExtensions import authz_user_action, authz_login_valid
+from CRABInterface.RESTExtensions import authz_login_valid
 from CRABInterface.Regexps import RX_USERNAME, RX_TASKNAME, RX_SUBGETUSERTRANSFER, RX_SUBPOSTUSERTRANSFER, RX_JOBID, RX_ANYTHING
 
 from ServerUtilities import TRANSFERDB_STATUSES, PUBLICATIONDB_STATUSES
 # external dependecies here
 import time
 import logging
-import cherrypy
 
 
 class RESTFileUserTransfers(RESTEntity):
     """REST entity to handle interactions between CAFTaskWorker and TaskManager database"""
 
-    def __init__(self, app, api, config, mount):
+    #Disabling unused argument since those are all required by the framework
+    def __init__(self, app, api, config, mount): #pylint: disable=unused-argument
         RESTEntity.__init__(self, app, api, config, mount)
         self.transferDB = getDBinstance(config, 'FileTransfersDB', 'FileTransfers')
         self.logger = logging.getLogger("CRABLogger.FileTransfers")
 
-    def validate(self, apiobj, method, api, param, safe):
+    #Disabling again unused argument since those are all required by the framework
+    def validate(self, apiobj, method, api, param, safe): #pylint: disable=unused-argument
         """Validating all the input parameter as enforced by the WMCore.REST module"""
         # TODO, use authz_user_action() which will allow only user to maintain and modify its own
         # documents
@@ -159,8 +162,6 @@ class RESTFileUserTransfers(RESTEntity):
             binds['job_id'] = [job_id]
             binds['job_retry_count'] = [job_retry_count]
             return self.api.modify(self.transferDB.UpdateUserTransfersById_sql, **binds)
-            pass
-
         elif subresource == 'killTransfers':
             ###############################################
             # killTransfers API
@@ -178,7 +179,6 @@ class RESTFileUserTransfers(RESTEntity):
             binds['transfer_state'] = [TRANSFERDB_STATUSES['NEW']]
             binds['new_transfer_state'] = [TRANSFERDB_STATUSES['KILL']]
             return self.api.modifynocheck(self.transferDB.KillUserTransfers_sql, **binds)
-
         elif subresource == 'killTransfersById':
             # This one is a bit problematic! If PostJob timeouts after 24 and transfer is in
             # any state. It will send to kill these transfers. Now if state is ACQUIRED
@@ -199,8 +199,6 @@ class RESTFileUserTransfers(RESTEntity):
                     continue
                 killStatus['killed'].append(item)
             return [killStatus]
-
-
         elif subresource == 'retryTransfers':
             raise NotImplementedError
             ###############################################
